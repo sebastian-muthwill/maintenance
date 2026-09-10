@@ -4,17 +4,17 @@
 #
 # Configuration via environment variables or command-line arguments:
 #
-#   OLD_DB_HOST        Hostname / IP of the source PostgreSQL server  (default: localhost)
-#   OLD_DB_PORT        Port of the source server                       (default: 5432)
-#   OLD_DB_NAME        Database name on the source server              (required)
-#   OLD_DB_USER        Username for the source server                  (required)
+#   OLD_DB_HOST        Hostname / IP of the source PostgreSQL server  (default: from .pgpass or localhost)
+#   OLD_DB_PORT        Port of the source server                       (default: from .pgpass or 5432)
+#   OLD_DB_NAME        Database name on the source server              (required unless derivable from .pgpass)
+#   OLD_DB_USER        Username for the source server                  (required unless derivable from .pgpass)
 #   OLD_DB_PASSWORD    Password for the source server                  (optional, use .pgpass otherwise)
 #   OLD_DB_PGPASSFILE  Path to .pgpass for source server               (optional)
 #
-#   NEW_DB_HOST        Hostname / IP of the target PostgreSQL server  (default: localhost)
-#   NEW_DB_PORT        Port of the target server                       (default: 5432)
-#   NEW_DB_NAME        Database name on the target server              (defaults to OLD_DB_NAME)
-#   NEW_DB_USER        Username for the target server                  (required)
+#   NEW_DB_HOST        Hostname / IP of the target PostgreSQL server  (default: from .pgpass or localhost)
+#   NEW_DB_PORT        Port of the target server                       (default: from .pgpass or 5432)
+#   NEW_DB_NAME        Database name on the target server              (default: from .pgpass or OLD_DB_NAME)
+#   NEW_DB_USER        Username for the target server                  (required unless derivable from .pgpass)
 #   NEW_DB_PASSWORD    Password for the target server                  (optional, use .pgpass otherwise)
 #   NEW_DB_PGPASSFILE  Path to .pgpass for target server               (optional)
 #
@@ -34,15 +34,15 @@
 set -euo pipefail
 
 # ─── Defaults ────────────────────────────────────────────────────────────────
-OLD_DB_HOST="${OLD_DB_HOST:-localhost}"
-OLD_DB_PORT="${OLD_DB_PORT:-5432}"
+OLD_DB_HOST="${OLD_DB_HOST:-}"
+OLD_DB_PORT="${OLD_DB_PORT:-}"
 OLD_DB_NAME="${OLD_DB_NAME:-}"
 OLD_DB_USER="${OLD_DB_USER:-}"
 OLD_DB_PASSWORD="${OLD_DB_PASSWORD:-}"
 OLD_DB_PGPASSFILE="${OLD_DB_PGPASSFILE:-}"
 
-NEW_DB_HOST="${NEW_DB_HOST:-localhost}"
-NEW_DB_PORT="${NEW_DB_PORT:-5432}"
+NEW_DB_HOST="${NEW_DB_HOST:-}"
+NEW_DB_PORT="${NEW_DB_PORT:-}"
 NEW_DB_NAME="${NEW_DB_NAME:-}"
 NEW_DB_USER="${NEW_DB_USER:-}"
 NEW_DB_PASSWORD="${NEW_DB_PASSWORD:-}"
@@ -79,6 +79,63 @@ validate_pgpassfile() {
     [[ -r "$pgpassfile" ]] || err "${label} .pgpass file is not readable: ${pgpassfile}"
 }
 
+resolve_connection_from_pgpass() {
+    local label="$1"
+    local pgpassfile="$2"
+    local -n host_ref="$3"
+    local -n port_ref="$4"
+    local -n db_ref="$5"
+    local -n user_ref="$6"
+
+    local line
+    local entry_host
+    local entry_port
+    local entry_db
+    local entry_user
+    local found_match=false
+
+    while IFS= read -r line || [[ -n "$line" ]]; do
+        [[ -z "$line" || "$line" =~ ^[[:space:]]*# ]] && continue
+
+        IFS=':' read -r entry_host entry_port entry_db entry_user _ <<< "$line"
+        [[ -n "$entry_user" ]] || continue
+
+        if [[ -n "$host_ref" && "$entry_host" != "*" && "$entry_host" != "$host_ref" ]]; then
+            continue
+        fi
+        if [[ -n "$port_ref" && "$entry_port" != "*" && "$entry_port" != "$port_ref" ]]; then
+            continue
+        fi
+        if [[ -n "$db_ref" && "$entry_db" != "*" && "$entry_db" != "$db_ref" ]]; then
+            continue
+        fi
+        if [[ -n "$user_ref" && "$entry_user" != "*" && "$entry_user" != "$user_ref" ]]; then
+            continue
+        fi
+
+        found_match=true
+
+        if [[ -z "$host_ref" && "$entry_host" != "*" ]]; then
+            host_ref="$entry_host"
+        fi
+        if [[ -z "$port_ref" && "$entry_port" != "*" ]]; then
+            port_ref="$entry_port"
+        fi
+        if [[ -z "$db_ref" && "$entry_db" != "*" ]]; then
+            db_ref="$entry_db"
+        fi
+        if [[ -z "$user_ref" && "$entry_user" != "*" ]]; then
+            user_ref="$entry_user"
+        fi
+
+        break
+    done < "$pgpassfile"
+
+    if [[ "$found_match" == false ]]; then
+        err "${label} .pgpass file has no entry matching the provided connection parameters."
+    fi
+}
+
 # ─── Argument parsing ─────────────────────────────────────────────────────────
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -104,25 +161,40 @@ while [[ $# -gt 0 ]]; do
     shift
 done
 
-# ─── Validation ───────────────────────────────────────────────────────────────
-if [[ "$RESTORE_ONLY" == false ]]; then
-    [[ -n "$OLD_DB_NAME" ]] || err "Source database name is required (OLD_DB_NAME or -d)."
-    [[ -n "$OLD_DB_USER" ]] || err "Source database user is required (OLD_DB_USER or -U)."
-fi
-
-if [[ "$DUMP_ONLY" == false ]]; then
-    [[ -n "$NEW_DB_USER" ]] || err "Target database user is required (NEW_DB_USER or -u)."
-fi
-
-# Target DB name defaults to source DB name
-NEW_DB_NAME="${NEW_DB_NAME:-$OLD_DB_NAME}"
-
 if [[ -n "$OLD_DB_PGPASSFILE" ]]; then
     validate_pgpassfile "$OLD_DB_PGPASSFILE" "Source"
 fi
 
 if [[ -n "$NEW_DB_PGPASSFILE" ]]; then
     validate_pgpassfile "$NEW_DB_PGPASSFILE" "Target"
+fi
+
+if [[ "$RESTORE_ONLY" == false && -n "$OLD_DB_PGPASSFILE" ]]; then
+    resolve_connection_from_pgpass "Source" "$OLD_DB_PGPASSFILE" OLD_DB_HOST OLD_DB_PORT OLD_DB_NAME OLD_DB_USER
+fi
+
+if [[ "$DUMP_ONLY" == false && -n "$NEW_DB_PGPASSFILE" ]]; then
+    resolve_connection_from_pgpass "Target" "$NEW_DB_PGPASSFILE" NEW_DB_HOST NEW_DB_PORT NEW_DB_NAME NEW_DB_USER
+fi
+
+# Fall back to traditional defaults when host/port were not specified or derived.
+OLD_DB_HOST="${OLD_DB_HOST:-localhost}"
+OLD_DB_PORT="${OLD_DB_PORT:-5432}"
+NEW_DB_HOST="${NEW_DB_HOST:-localhost}"
+NEW_DB_PORT="${NEW_DB_PORT:-5432}"
+
+# Target DB name defaults to source DB name when not provided/derived.
+NEW_DB_NAME="${NEW_DB_NAME:-$OLD_DB_NAME}"
+
+# ─── Validation ───────────────────────────────────────────────────────────────
+if [[ "$RESTORE_ONLY" == false ]]; then
+    [[ -n "$OLD_DB_NAME" ]] || err "Source database name is required (OLD_DB_NAME / -d, or derivable from --old-pgpassfile)."
+    [[ -n "$OLD_DB_USER" ]] || err "Source database user is required (OLD_DB_USER / -U, or derivable from --old-pgpassfile)."
+fi
+
+if [[ "$DUMP_ONLY" == false ]]; then
+    [[ -n "$NEW_DB_NAME" ]] || err "Target database name is required (NEW_DB_NAME / -D, derivable from --new-pgpassfile, or inherited from OLD_DB_NAME)."
+    [[ -n "$NEW_DB_USER" ]] || err "Target database user is required (NEW_DB_USER / -u, or derivable from --new-pgpassfile)."
 fi
 
 # ─── Tool checks ──────────────────────────────────────────────────────────────

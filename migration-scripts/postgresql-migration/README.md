@@ -19,18 +19,20 @@ Dumps the database from the **old server** and restores it on the **new server**
 
 All options can be set via **environment variables** or **command-line flags** (flags take precedence).
 
+When `OLD_DB_PGPASSFILE` / `--old-pgpassfile` is set, the script can derive missing source values (`host`, `port`, `database`, `user`) from the first matching entry in that file. The same applies for target values when `NEW_DB_PGPASSFILE` / `--new-pgpassfile` is set.
+
 | Environment variable | Flag | Description | Default |
 |---|---|---|---|
-| `OLD_DB_HOST` | `-H` | Source server hostname / IP | `localhost` |
-| `OLD_DB_PORT` | `-P` | Source server port | `5432` |
-| `OLD_DB_NAME` | `-d` | Source database name | *(required)* |
-| `OLD_DB_USER` | `-U` | Source database user | *(required)* |
+| `OLD_DB_HOST` | `-H` | Source server hostname / IP | from `.pgpass` or `localhost` |
+| `OLD_DB_PORT` | `-P` | Source server port | from `.pgpass` or `5432` |
+| `OLD_DB_NAME` | `-d` | Source database name | from `.pgpass` or *(required)* |
+| `OLD_DB_USER` | `-U` | Source database user | from `.pgpass` or *(required)* |
 | `OLD_DB_PASSWORD` | `-p` | Source database password | *(use `.pgpass`)* |
 | `OLD_DB_PGPASSFILE` | `--old-pgpassfile` | Path to source `.pgpass` file | *(optional)* |
-| `NEW_DB_HOST` | `-h` | Target server hostname / IP | `localhost` |
-| `NEW_DB_PORT` | `-q` | Target server port | `5432` |
-| `NEW_DB_NAME` | `-D` | Target database name | same as source |
-| `NEW_DB_USER` | `-u` | Target database user | *(required)* |
+| `NEW_DB_HOST` | `-h` | Target server hostname / IP | from `.pgpass` or `localhost` |
+| `NEW_DB_PORT` | `-q` | Target server port | from `.pgpass` or `5432` |
+| `NEW_DB_NAME` | `-D` | Target database name | from `.pgpass` or same as source |
+| `NEW_DB_USER` | `-u` | Target database user | from `.pgpass` or *(required)* |
 | `NEW_DB_PASSWORD` | `-w` | Target database password | *(use `.pgpass`)* |
 | `NEW_DB_PGPASSFILE` | `--new-pgpassfile` | Path to target `.pgpass` file | *(optional)* |
 | `DUMP_DIR` | `-o` | Local directory for dump files | `./dumps` |
@@ -40,14 +42,8 @@ All options can be set via **environment variables** or **command-line flags** (
 
 **Full migration (dump + restore):**
 ```bash
-export OLD_DB_HOST=old-server.example.com
-export OLD_DB_NAME=mydb
-export OLD_DB_USER=myuser
 export OLD_DB_PGPASSFILE=/secure/old-db.pgpass
 
-export NEW_DB_HOST=new-server.example.com
-export NEW_DB_NAME=mydb
-export NEW_DB_USER=newuser
 export NEW_DB_PGPASSFILE=/secure/new-db.pgpass
 
 bash migration-scripts/postgresql-migration/migrate_pg_db.sh
@@ -56,14 +52,14 @@ bash migration-scripts/postgresql-migration/migrate_pg_db.sh
 Or using flags:
 ```bash
 bash migration-scripts/postgresql-migration/migrate_pg_db.sh \
-  -H old-server.example.com -d mydb -U myuser --old-pgpassfile /secure/old-db.pgpass \
-  -h new-server.example.com -D mydb -u newuser --new-pgpassfile /secure/new-db.pgpass
+  --old-pgpassfile /secure/old-db.pgpass \
+  --new-pgpassfile /secure/new-db.pgpass
 ```
 
 **Dump only** (store the dump locally, do not restore yet):
 ```bash
 bash migration-scripts/postgresql-migration/migrate_pg_db.sh --dump-only \
-  -H old-server.example.com -d mydb -U myuser --old-pgpassfile /secure/old-db.pgpass \
+  --old-pgpassfile /secure/old-db.pgpass \
   -o /var/backups/postgres
 ```
 
@@ -71,13 +67,26 @@ bash migration-scripts/postgresql-migration/migrate_pg_db.sh --dump-only \
 ```bash
 bash migration-scripts/postgresql-migration/migrate_pg_db.sh --restore-only \
   -f /var/backups/postgres/mydb_20240101_120000.dump \
-  -h new-server.example.com -D mydb -u newuser --new-pgpassfile /secure/new-db.pgpass
+  --new-pgpassfile /secure/new-db.pgpass
+```
+
+Example `.pgpass` files:
+
+```text
+# /secure/old-db.pgpass
+old-server.example.com:5432:mydb:myuser:old_password
+```
+
+```text
+# /secure/new-db.pgpass
+new-server.example.com:5432:mydb:newuser:new_password
 ```
 
 ### Security notes
 
 * Prefer using `.pgpass` files instead of passing passwords on the command line or in environment variables to avoid exposing credentials in shell history or process lists.
 * The script supports one `.pgpass` file for the source connection (`OLD_DB_PGPASSFILE` / `--old-pgpassfile`) and one for the target connection (`NEW_DB_PGPASSFILE` / `--new-pgpassfile`).
+* If connection fields are omitted, the script reads them from the first matching entry in the corresponding `.pgpass` file.
 * `.pgpass` files should contain entries in the format `hostname:port:database:username:password` and must be readable by the executing user. `chmod 0600 ~/.pgpass`
 * Make sure the dump files are stored in a secure location with restricted permissions.
 * Delete dump files after a successful migration if they are no longer needed.
