@@ -217,6 +217,8 @@ run_pg_dump() {
         --port="$OLD_DB_PORT"
         --username="$OLD_DB_USER"
         --format=custom
+        --no-owner
+        --no-privileges
         --blobs
         --verbose
         --file="$DUMP_FILE"

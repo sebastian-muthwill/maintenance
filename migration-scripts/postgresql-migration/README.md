@@ -91,3 +91,20 @@ new-server.example.com:5432:mydb:newuser:new_password
 * `.pgpass` files should contain entries in the format `hostname:port:database:username:password` and must be readable by the executing user. `chmod 0600 ~/.pgpass`
 * Make sure the dump files are stored in a secure location with restricted permissions.
 * Delete dump files after a successful migration if they are no longer needed.
+
+### Compatibility note (Cloud SQL -> other PostgreSQL hosts)
+
+If your source database was created by a provider-specific admin role (for example `cloudsqlsuperuser` on Google Cloud SQL), restores can fail on other platforms with errors like:
+
+```text
+pg_restore: error: could not execute query: ERROR:  role "cloudsqlsuperuser" does not exist
+Command was: ALTER SCHEMA public OWNER TO cloudsqlsuperuser;
+```
+
+This script now creates dumps with `--no-owner --no-privileges`, so ownership and ACL statements are not included in the dump output.
+
+If you need to restore an older dump that still contains role ownership metadata, restore it with:
+
+```bash
+pg_restore --no-owner --no-privileges --dbname=<target_db> <dump_file>
+```
