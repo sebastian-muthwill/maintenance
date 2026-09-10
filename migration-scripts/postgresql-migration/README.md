@@ -1,6 +1,7 @@
 # Database Migration Scripts
 
 This folder contains scripts for migrating the PostgreSQL database between servers (e.g. from Google Cloud to a new host).
+! Only same Postgresql server versions are supported !
 
 ## `migrate_pg_db.sh`
 
@@ -8,7 +9,7 @@ Dumps the database from the **old server** and restores it on the **new server**
 
 ### Prerequisites
 
-* `pg_dump` and `pg_restore` / `psql` installed on the machine running the script.
+* `pg_dump` and `pg_restore` / `psql` installed on the machine running the script. (Install with `sudo apt install -y postgresql-client`)
 * The machine must have network access to both the source and target PostgreSQL servers.
 * The target database must already exist on the new server. Create it if needed:
   ```sql
