@@ -38,6 +38,7 @@ When `OLD_DB_PGPASSFILE` / `--old-pgpassfile` is set, the script can derive miss
 | `NEW_DB_PGPASSFILE` | `--new-pgpassfile` | Path to target `.pgpass` file | *(optional)* |
 | `DUMP_DIR` | `-o` | Local directory for dump files | `./dumps` |
 | `DUMP_FILE` | `-f` | Explicit path to dump file | auto-generated |
+| `DUMP_DATA_ONLY` | `--data-only` | Dump data only (no schema/constraints) | `false` |
 
 ### Usage examples
 
@@ -60,6 +61,13 @@ bash migration-scripts/postgresql-migration/migrate_pg_db.sh \
 **Dump only** (store the dump locally, do not restore yet):
 ```bash
 bash migration-scripts/postgresql-migration/migrate_pg_db.sh --dump-only \
+  --old-pgpassfile /secure/old-db.pgpass \
+  -o /var/backups/postgres
+```
+
+**Dump only (data-only for existing target schema, e.g. Coolify UI import):**
+```bash
+bash migration-scripts/postgresql-migration/migrate_pg_db.sh --dump-only --data-only \
   --old-pgpassfile /secure/old-db.pgpass \
   -o /var/backups/postgres
 ```
@@ -108,3 +116,17 @@ If you need to restore an older dump that still contains role ownership metadata
 ```bash
 pg_restore --no-owner --no-privileges --dbname=<target_db> <dump_file>
 ```
+
+### Compatibility note (existing schema on Coolify)
+
+If the target database already has tables/constraints (for example after running Django migrations), importing a full schema+data dump can fail with many `constraint ... already exists` errors.
+
+Use a **data-only** dump for this case:
+
+```bash
+bash migration-scripts/postgresql-migration/migrate_pg_db.sh --dump-only --data-only \
+  --old-pgpassfile /secure/old-db.pgpass \
+  -f /var/backups/postgres/app_data_only.dump
+```
+
+Then import that dump in Coolify UI. This avoids recreating schema objects (constraints, indexes, foreign keys) that already exist.

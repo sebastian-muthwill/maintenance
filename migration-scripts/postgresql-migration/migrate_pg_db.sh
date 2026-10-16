@@ -20,6 +20,7 @@
 #
 #   DUMP_DIR           Local directory to store the dump file          (default: ./dumps)
 #   DUMP_FILE          Explicit dump file path (overrides DUMP_DIR)    (optional)
+#   DUMP_DATA_ONLY     Dump data only (no schema/constraints)           (default: false)
 #
 # Command-line arguments override environment variables:
 #   -H  old host      -P  old port    -d  old db name   -U  old user   -p  old password
@@ -27,6 +28,7 @@
 #   -h  new host      -q  new port    -D  new db name   -u  new user   -w  new password
 #   --new-pgpassfile  new .pgpass file path
 #   -o  dump dir      -f  dump file
+#   --data-only       Dump data only (for restoring into existing schema)
 #   --dump-only       Only dump, do not restore
 #   --restore-only    Only restore from an existing dump file (requires -f / DUMP_FILE)
 #   --help            Show this help and exit
@@ -50,6 +52,7 @@ NEW_DB_PGPASSFILE="${NEW_DB_PGPASSFILE:-}"
 
 DUMP_DIR="${DUMP_DIR:-./dumps}"
 DUMP_FILE="${DUMP_FILE:-}"
+DUMP_DATA_ONLY="${DUMP_DATA_ONLY:-false}"
 
 DUMP_ONLY=false
 RESTORE_ONLY=false
@@ -156,10 +159,15 @@ while [[ $# -gt 0 ]]; do
         --new-pgpassfile) NEW_DB_PGPASSFILE="$2"; shift ;;
         -o) DUMP_DIR="$2";        shift ;;
         -f) DUMP_FILE="$2";       shift ;;
+        --data-only) DUMP_DATA_ONLY=true ;;
         *) err "Unknown argument: $1. Use --help for usage." ;;
     esac
     shift
 done
+
+if [[ "$DUMP_DATA_ONLY" != "true" && "$DUMP_DATA_ONLY" != "false" ]]; then
+    err "DUMP_DATA_ONLY must be 'true' or 'false'."
+fi
 
 if [[ -n "$OLD_DB_PGPASSFILE" ]]; then
     validate_pgpassfile "$OLD_DB_PGPASSFILE" "Source"
@@ -225,6 +233,10 @@ run_pg_dump() {
         "$OLD_DB_NAME"
     )
 
+    if [[ "$DUMP_DATA_ONLY" == "true" ]]; then
+        pg_dump_cmd+=(--data-only)
+    fi
+
     if [[ -n "$OLD_DB_PASSWORD" ]]; then
         PGPASSWORD="$OLD_DB_PASSWORD" "${pg_dump_cmd[@]}"
     elif [[ -n "$OLD_DB_PGPASSFILE" ]]; then
@@ -258,7 +270,11 @@ run_pg_restore() {
 
 # ─── Main ─────────────────────────────────────────────────────────────────────
 if [[ "$RESTORE_ONLY" == false ]]; then
-    log "Starting dump of '${OLD_DB_NAME}' from ${OLD_DB_HOST}:${OLD_DB_PORT} ..."
+    if [[ "$DUMP_DATA_ONLY" == "true" ]]; then
+        log "Starting data-only dump of '${OLD_DB_NAME}' from ${OLD_DB_HOST}:${OLD_DB_PORT} ..."
+    else
+        log "Starting dump of '${OLD_DB_NAME}' from ${OLD_DB_HOST}:${OLD_DB_PORT} ..."
+    fi
     run_pg_dump
     DUMP_SIZE="$(du -sh "$DUMP_FILE" | cut -f1)"
     log "Dump complete: ${DUMP_FILE} (${DUMP_SIZE})"
